@@ -1,0 +1,34 @@
+Q: What is the capital of France?
+A: London
+A: Berlin
+A: Paris
+A: Madrid
+C: 2
+
+Q: What is 7 × 8?
+A: 54
+A: 56
+A: 58
+A: 52
+C: 1
+
+Q: Which planet is known as the Red Planet?
+A: Venus
+A: Mars
+A: Jupiter
+A: Saturn
+C: 1
+
+Q: What is the largest ocean on Earth?
+A: Atlantic Ocean
+A: Indian Ocean
+A: Arctic Ocean
+A: Pacific Ocean
+C: 3
+
+Q: Who wrote 'Romeo and Juliet'?
+A: Charles Dickens
+A: William Shakespeare
+A: Jane Austen
+A: Mark Twain
+C: 1

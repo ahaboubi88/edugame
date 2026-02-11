@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="en" dir="auto">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+    <title>سباق التتابع التعليمي - Relay Race Quiz</title>
+    <link rel="stylesheet" href="styles.css">
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Arabic:wght@400;700&family=Segoe+UI:wght@400;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <!-- Fireworks Canvas -->
+    <canvas id="fireworksCanvas"></canvas>
+
+    <!-- Language Switcher -->
+    <div id="languageSwitcher" class="language-switcher">
+        <button id="btnLangAr" class="lang-btn active">العربية</button>
+        <button id="btnLangEn" class="lang-btn">English</button>
+    </div>
+
+    <!-- Main Menu -->
+    <div id="mainMenu" class="screen">
+        <h1 data-key="gameTitle">🏃‍♂️ سباق التتابع التعليمي</h1>
+        <div class="menu-buttons">
+            <button id="btnNewGame" class="menu-btn" data-key="newGame">لعبة جديدة</button>
+            <button id="btnManageQuestions" class="menu-btn" data-key="manageQuestions">إدارة ملفات الأسئلة</button>
+            <button id="btnInstructions" class="menu-btn" data-key="instructions">تعليمات اللعب</button>
+        </div>
+    </div>
+
+    <!-- Question File Management Screen -->
+    <div id="fileManager" class="screen hidden">
+        <h2 data-key="fileManagerTitle">مدير الملفات</h2>
+        <div class="file-section">
+            <h3 data-key="uploadNewFile">رفع ملف جديد</h3>
+            <div class="upload-area">
+                <select id="fileTypeSelect" style="padding: 15px; border-radius: 10px; border: none; background: white; cursor: pointer;">
+                    <option value="questions" data-key="fileTypeQuestion">ملف أسئلة</option>
+                    <option value="class" data-key="fileTypeClass">ملف فصل</option>
+                </select>
+                <input type="file" id="fileInput" accept=".json,.csv,.txt">
+                <button id="btnUpload" data-key="upload">رفع</button>
+            </div>
+            <div class="file-format-help">
+                <p data-key="supportedFormats">الصيغ المدعومة: JSON, CSV, TXT</p>
+                <p style="margin-top: 10px; font-size: 0.85em; color: rgba(255,255,255,0.6);">
+                    <strong>ملف الفصل:</strong> يجب أن يحتوي على أسماء الفرق والطلاب. الصيغ: Team,Student (CSV) أو Team: Name / - Student (TXT)
+                </p>
+            </div>
+        </div>
+        <div class="file-section">
+            <div id="fileList" class="file-list"></div>
+        </div>
+        <button id="btnBackToMenu" class="back-btn" data-key="backToMenu">العودة للقائمة</button>
+    </div>
+
+    <!-- Game Setup Screen -->
+    <div id="gameSetup" class="screen hidden">
+        <h2 data-key="gameSetupTitle">إعداد اللعبة</h2>
+        <div class="setup-section">
+            <label data-key="selectQuestionFile">اختر ملف الأسئلة:</label>
+            <select id="questionFileSelect"></select>
+        </div>
+        <div class="setup-section">
+            <label data-key="selectClassFile">اختر ملف الفصل (اختياري):</label>
+            <select id="classFileSelect">
+                <option value="" data-key="noClassFile">بدون ملف فصل</option>
+            </select>
+        </div>
+        <div class="setup-section">
+            <label data-key="numberOfTeams">عدد الفرق:</label>
+            <select id="teamCount">
+                <option value="2">2</option>
+                <option value="3">3</option>
+                <option value="4" selected>4</option>
+                <option value="5">5</option>
+                <option value="6">6</option>
+            </select>
+        </div>
+        <div class="setup-section">
+            <label data-key="studentsPerTeam">عدد الطلاب في كل فريق:</label>
+            <select id="studentsPerTeam">
+                <option value="2">2</option>
+                <option value="3">3</option>
+                <option value="4" selected>4</option>
+                <option value="5">5</option>
+                <option value="6">6</option>
+            </select>
+        </div>
+        <div class="setup-section">
+            <label data-key="trackLength">طول المضمار (لفات):</label>
+            <select id="trackLaps">
+                <option value="1">1</option>
+                <option value="2">2</option>
+                <option value="3">3</option>
+                <option value="4" selected>4</option>
+            </select>
+        </div>
+        <div id="teamNames" class="team-names"></div>
+        <button id="btnStartGame" class="start-btn" data-key="startGame">بدء اللعبة</button>
+        <button id="btnCancelSetup" class="back-btn" data-key="cancel">إلغاء</button>
+    </div>
+
+    <!-- Game Screen -->
+    <div id="gameScreen" class="screen hidden">
+        <div class="game-header">
+            <div id="lapInfo" class="lap-info">اللفة 1 من 4</div>
+            <div class="game-title-small" data-key="gameTitle">سباق التتابع التعليمي</div>
+            <button id="btnPause" class="pause-btn" data-key="pause">إيقاف مؤقت</button>
+        </div>
+        
+        <canvas id="gameCanvas"></canvas>
+        
+        <!-- Multiple question panels for simultaneous answering -->
+        <div id="questionPanels" class="question-panels-container"></div>
+        
+        <div id="countdown" class="countdown hidden">3</div>
+        
+        <!-- Waiting overlay for teams that answered while others are still answering -->
+        <div id="waitingOverlay" class="waiting-overlay hidden">
+            <div class="waiting-content">
+                <h3 data-key="waitingForOthers">في انتظار الفرق الأخرى...</h3>
+                <div class="spinner"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Pause Menu -->
+    <div id="pauseMenu" class="overlay hidden">
+        <div class="pause-content">
+            <h2 data-key="gamePaused">اللعبة متوقفة</h2>
+            <button id="btnResume" data-key="resume">استئناف</button>
+            <button id="btnRestart" data-key="restart">إعادة اللعبة</button>
+            <button id="btnQuitToMenu" data-key="quitToMenu">الخروج للقائمة</button>
+        </div>
+    </div>
+
+    <!-- Results Screen -->
+    <div id="resultsScreen" class="screen results-screen hidden">
+        <h2 data-key="raceResults">🏆 نتائج السباق</h2>
+        <div id="resultsList" class="results-list"></div>
+        <div class="results-buttons">
+            <button id="btnDownloadReport" class="menu-btn" data-key="downloadReport">تحميل التقرير</button>
+            <button id="btnNewGameFromResults" class="menu-btn" data-key="newGameBtn">لعبة جديدة</button>
+            <button id="btnBackToMenuFromResults" class="back-btn" data-key="mainMenuBtn">القائمة الرئيسية</button>
+        </div>
+    </div>
+
+    <!-- Instructions Screen -->
+    <div id="instructionsScreen" class="screen hidden">
+        <h2 data-key="howToPlay">كيفية اللعب</h2>
+        <div class="instructions">
+            <p data-key="instruction1">1. قسم الطلاب إلى فرق</p>
+            <p data-key="instruction2">2. كل طالب يتحكم في عدّاء واحد</p>
+            <p data-key="instruction3">3. أجب على الأسئلة بشكل صحيح للركض بسرعة أكبر</p>
+            <p data-key="instruction4">4. الإجابات الخاطئة تبطئك</p>
+            <p data-key="instruction5">5. مرّر العصا بعد كل لفة</p>
+            <p data-key="instruction6">6. أول فريق ينتهي يفوز!</p>
+        </div>
+        <button id="btnBackFromInstructions" class="back-btn" data-key="back">رجوع</button>
+    </div>
+
+    <script src="game.js"></script>
+</body>
+</html>
