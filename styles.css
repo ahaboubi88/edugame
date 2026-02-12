@@ -133,9 +133,20 @@ body {
     display: flex;
     flex-direction: column;
     align-items: center;
-    justify-content: center;
+    justify-content: flex-start;
     min-height: 100vh;
     padding: 20px;
+    overflow-y: auto;
+    overflow-x: hidden;
+    height: 100vh;
+}
+
+#gameScreen {
+    overflow-y: hidden;
+    overflow-x: hidden;
+    justify-content: center;
+    padding: 0;
+    height: 100vh;
 }
 
 .hidden {
@@ -1630,4 +1641,29 @@ h3 {
     .answer-btn {
         -webkit-tap-highlight-color: transparent;
     }
+}
+
+/* Scrollbar Styling */
+::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+}
+
+::-webkit-scrollbar-track {
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 5px;
+}
+
+::-webkit-scrollbar-thumb {
+    background: rgba(255, 215, 0, 0.6);
+    border-radius: 5px;
+    border: 2px solid rgba(255, 255, 255, 0.1);
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: rgba(255, 215, 0, 0.8);
+}
+
+::-webkit-scrollbar-corner {
+    background: rgba(255, 255, 255, 0.1);
 }

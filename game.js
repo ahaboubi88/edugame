@@ -417,7 +417,7 @@ function resizeCanvas() {
 }
 
 function initTrackDimensions() {
-    // Calculate oval track dimensions to fit on screen with responsive padding
+    // Calculate stadium track dimensions to fit on screen with responsive padding
     const isMobile = window.innerWidth <= 768;
     const isTablet = window.innerWidth <= 992;
     const padding = isMobile ? 50 : (isTablet ? 60 : 80);
@@ -425,20 +425,87 @@ function initTrackDimensions() {
     gameState.track.centerX = canvas.width / 2;
     gameState.track.centerY = canvas.height / 2;
     
-    // Make the oval wider than tall (typical track shape)
-    gameState.track.radiusX = (canvas.width - padding * 2) / 2;
-    
-    // Adjust vertical size based on screen height
+    // Stadium track: two parallel straights with semicircular ends
+    // Calculate the turn radius (based on screen height)
     const verticalPadding = isMobile ? 120 : (isTablet ? 100 : 80);
-    gameState.track.radiusY = (canvas.height - verticalPadding * 2) / 2.5;
+    gameState.track.turnRadius = (canvas.height - verticalPadding * 2) / 2.5;
+    
+    // Calculate straight length (based on screen width)
+    gameState.track.straightLength = (canvas.width - padding * 2) - (2 * gameState.track.turnRadius);
+    
+    // Ensure straight length is positive and reasonable
+    if (gameState.track.straightLength < 50) {
+        gameState.track.straightLength = 50;
+        gameState.track.turnRadius = (canvas.width - padding * 2 - 50) / 2;
+    }
+    
+    // Store radiusX and radiusY for backward compatibility with other functions
+    gameState.track.radiusX = gameState.track.turnRadius + gameState.track.straightLength / 2;
+    gameState.track.radiusY = gameState.track.turnRadius;
     
     // Adjust lane width for smaller screens
     gameState.track.laneWidth = isMobile ? 18 : (isTablet ? 22 : 25);
     
     // Ensure minimum sizes
-    gameState.track.radiusX = Math.max(gameState.track.radiusX, 100);
-    gameState.track.radiusY = Math.max(gameState.track.radiusY, 60);
+    gameState.track.turnRadius = Math.max(gameState.track.turnRadius, 60);
+    gameState.track.straightLength = Math.max(gameState.track.straightLength, 50);
     gameState.track.laneWidth = Math.max(gameState.track.laneWidth, 15);
+    
+    // Calculate total track circumference for lap calculations
+    // Stadium circumference = 2 * straightLength + 2 * π * turnRadius (full circle)
+    gameState.track.circumference = (2 * gameState.track.straightLength) + (2 * Math.PI * gameState.track.turnRadius);
+}
+
+// Helper function to calculate position on stadium track
+function getStadiumTrackPosition(distance, laneIndex) {
+    const { centerX, centerY, turnRadius, straightLength, laneWidth, circumference } = gameState.track;
+    const leftCenterX = centerX - straightLength / 2;
+    const rightCenterX = centerX + straightLength / 2;
+    
+    const laneOffset = laneIndex * laneWidth + laneWidth / 2;
+    const currentTurnRadius = turnRadius - laneOffset;
+    
+    const semicircleLength = Math.PI * currentTurnRadius;
+    const straightPathLength = straightLength;
+    const startOffset = 20;
+    const adjustedStraightLength = straightLength - startOffset;
+    const rightSemicircleStart = adjustedStraightLength + semicircleLength + straightPathLength;
+    const rightSemicircleAndFinalLength = circumference - rightSemicircleStart;
+    
+    const adjustedDistance = (distance + startOffset) % circumference;
+    let x, y, rotationAngle;
+    
+    if (adjustedDistance < adjustedStraightLength) {
+        // Bottom straight (going left from start line)
+        const progress = adjustedDistance / adjustedStraightLength;
+        x = (rightCenterX - startOffset) - (progress * adjustedStraightLength);
+        y = centerY + currentTurnRadius;
+        rotationAngle = Math.PI;
+    } else if (adjustedDistance < adjustedStraightLength + semicircleLength) {
+        // Left semicircle (going from bottom to top)
+        const arcDistance = adjustedDistance - adjustedStraightLength;
+        const arcProgress = arcDistance / semicircleLength;
+        const angle = Math.PI / 2 + (arcProgress * Math.PI);
+        x = leftCenterX + Math.cos(angle) * currentTurnRadius;
+        y = centerY + Math.sin(angle) * currentTurnRadius;
+        rotationAngle = angle + Math.PI / 2;
+    } else if (adjustedDistance < adjustedStraightLength + semicircleLength + straightPathLength) {
+        // Top straight (going right)
+        const progress = (adjustedDistance - adjustedStraightLength - semicircleLength) / straightPathLength;
+        x = leftCenterX + (progress * straightPathLength);
+        y = centerY - currentTurnRadius;
+        rotationAngle = 0;
+    } else {
+        // Right semicircle (going from top to bottom, ending at start line)
+        const rightDistance = adjustedDistance - rightSemicircleStart;
+        const arcProgress = rightDistance / rightSemicircleAndFinalLength;
+        const angle = -Math.PI / 2 + (arcProgress * Math.PI);
+        x = rightCenterX + Math.cos(angle) * currentTurnRadius;
+        y = centerY + Math.sin(angle) * currentTurnRadius;
+        rotationAngle = angle + Math.PI / 2;
+    }
+    
+    return { x, y, rotationAngle };
 }
 
 // ============================================
@@ -931,11 +998,14 @@ function startGame() {
     gameState.teams = [];
     for (let i = 0; i < teamCount; i++) {
         const studentsList = teamStudents[i] || [];
+        // Initialize student correct answers tracking
+        const studentCorrectAnswers = new Array(studentsList.length).fill(0);
         gameState.teams.push({
             name: teamNames[i],
             color: teamColors[i % teamColors.length],
             students: studentsList.length,
             studentNames: studentsList,
+            studentCorrectAnswers: studentCorrectAnswers,
             position: 0,
             speed: 0,
             baseSpeed: 5,
@@ -1026,9 +1096,7 @@ function updateGame() {
     // Pause updates if questions are active for any team
     if (gameState.isQuestionActive) return;
     
-    const { radiusX, radiusY } = gameState.track;
-    const avgRadius = (radiusX + radiusY) / 2;
-    const trackCircumference = 2 * Math.PI * avgRadius;
+    const trackCircumference = gameState.track.circumference;
     
     let allFinished = true;
     let teamsCompletedLap = [];
@@ -1164,7 +1232,9 @@ function renderGame() {
 // ============================================
 
 function drawStadiumCrowd() {
-    const { centerX, centerY, radiusX, radiusY } = gameState.track;
+    const { centerX, centerY, turnRadius, straightLength } = gameState.track;
+    const leftCenterX = centerX - straightLength / 2;
+    const rightCenterX = centerX + straightLength / 2;
     
     // Sky gradient - bright daylight
     const skyGradient = ctx.createLinearGradient(0, 0, 0, canvas.height);
@@ -1174,52 +1244,113 @@ function drawStadiumCrowd() {
     ctx.fillStyle = skyGradient;
     ctx.fillRect(0, 0, canvas.width, canvas.height);
     
-    // Distant stadium seating - tiers of stands with gray colors
+    // Distant stadium seating - tiers of stands with gray colors (stadium shape)
     const seatColors = ['#A9A9A9', '#909090', '#808080', '#707070', '#606060'];
     
     for (let row = 0; row < 15; row++) {
-        const standRadiusY = radiusY + 80 + row * 18;
-        const standRadiusX = radiusX + row * 22;
+        const standRadiusY = turnRadius + 80 + row * 18;
+        const standOffsetX = row * 15;
         const seatColor = seatColors[row % seatColors.length];
         
-        // Stadium stand
+        // Stadium stand (stadium shape with straights and semicircles)
         ctx.fillStyle = seatColor;
         ctx.beginPath();
-        ctx.ellipse(centerX, centerY, standRadiusX, standRadiusY, 0, 0, Math.PI * 2);
+        // Top straight
+        ctx.moveTo(leftCenterX - standOffsetX, centerY - standRadiusY);
+        ctx.lineTo(rightCenterX + standOffsetX, centerY - standRadiusY);
+        // Right semicircle
+        ctx.arc(rightCenterX, centerY, standRadiusY + standOffsetX, -Math.PI / 2, Math.PI / 2, false);
+        // Bottom straight
+        ctx.lineTo(leftCenterX - standOffsetX, centerY + standRadiusY);
+        // Left semicircle
+        ctx.arc(leftCenterX, centerY, standRadiusY + standOffsetX, Math.PI / 2, -Math.PI / 2, false);
+        ctx.closePath();
         ctx.fill();
         
         // Row lines
         ctx.strokeStyle = 'rgba(0,0,0,0.2)';
         ctx.lineWidth = 1;
         ctx.beginPath();
-        ctx.ellipse(centerX, centerY, standRadiusX - 5, standRadiusY - 5, 0, 0, Math.PI * 2);
+        const innerRadiusY = standRadiusY - 5;
+        const innerOffsetX = standOffsetX - 5;
+        ctx.moveTo(leftCenterX - innerOffsetX, centerY - innerRadiusY);
+        ctx.lineTo(rightCenterX + innerOffsetX, centerY - innerRadiusY);
+        ctx.arc(rightCenterX, centerY, innerRadiusY + innerOffsetX, -Math.PI / 2, Math.PI / 2, false);
+        ctx.lineTo(leftCenterX - innerOffsetX, centerY + innerRadiusY);
+        ctx.arc(leftCenterX, centerY, innerRadiusY + innerOffsetX, Math.PI / 2, -Math.PI / 2, false);
+        ctx.closePath();
         ctx.stroke();
     }
     
     // Crowd dots pattern on stands
     ctx.fillStyle = 'rgba(255,255,255,0.3)';
     for (let row = 2; row < 12; row++) {
-        const crowdRadiusY = radiusY + 85 + row * 16;
-        const crowdRadiusX = radiusX + row * 20;
+        const crowdRadiusY = turnRadius + 85 + row * 16;
+        const crowdOffsetX = row * 12;
         
-        for (let angle = 0; angle < Math.PI * 2; angle += 0.15) {
-            const x = centerX + Math.cos(angle) * crowdRadiusX;
-            const y = centerY + Math.sin(angle) * crowdRadiusY;
-            
-            // Crowd member
-            ctx.beginPath();
-            ctx.arc(x, y, 5, 0, Math.PI * 2);
-            ctx.fill();
+        // Draw crowd dots along the stadium shape
+        const crowdPoints = [];
+        
+        // Top straight
+        for (let t = 0; t <= 1; t += 0.1) {
+            crowdPoints.push({
+                x: leftCenterX - crowdOffsetX + t * (straightLength + crowdOffsetX * 2),
+                y: centerY - crowdRadiusY
+            });
         }
+        
+        // Right semicircle
+        for (let angle = -Math.PI / 2; angle <= Math.PI / 2; angle += 0.2) {
+            crowdPoints.push({
+                x: rightCenterX + Math.cos(angle) * (crowdRadiusY + crowdOffsetX),
+                y: centerY + Math.sin(angle) * crowdRadiusY
+            });
+        }
+        
+        // Bottom straight
+        for (let t = 1; t >= 0; t -= 0.1) {
+            crowdPoints.push({
+                x: leftCenterX - crowdOffsetX + t * (straightLength + crowdOffsetX * 2),
+                y: centerY + crowdRadiusY
+            });
+        }
+        
+        // Left semicircle
+        for (let angle = Math.PI / 2; angle <= 3 * Math.PI / 2; angle += 0.2) {
+            crowdPoints.push({
+                x: leftCenterX + Math.cos(angle) * (crowdRadiusY + crowdOffsetX),
+                y: centerY + Math.sin(angle) * crowdRadiusY
+            });
+        }
+        
+        crowdPoints.forEach(point => {
+            ctx.beginPath();
+            ctx.arc(point.x, point.y, 5, 0, Math.PI * 2);
+            ctx.fill();
+        });
     }
     
-    // Track infield (field events area)
-    const fieldGradient = ctx.createRadialGradient(centerX, centerY, 0, centerX, centerY, radiusX * 0.9);
+    // Track infield (field events area) - stadium shape
+    const infieldTurnRadius = turnRadius * 0.85;
+    const infieldStraightLength = straightLength * 0.85;
+    const infieldLeftX = centerX - infieldStraightLength / 2;
+    const infieldRightX = centerX + infieldStraightLength / 2;
+    
+    const fieldGradient = ctx.createRadialGradient(centerX, centerY, 0, centerX, centerY, straightLength / 2 + infieldTurnRadius);
     fieldGradient.addColorStop(0, '#228B22');  // Forest green center
     fieldGradient.addColorStop(1, '#2E8B57');  // Sea green edge
     ctx.fillStyle = fieldGradient;
     ctx.beginPath();
-    ctx.ellipse(centerX, centerY, radiusX * 0.95, radiusY * 0.95, 0, 0, Math.PI * 2);
+    // Top straight
+    ctx.moveTo(infieldLeftX, centerY - infieldTurnRadius);
+    ctx.lineTo(infieldRightX, centerY - infieldTurnRadius);
+    // Right semicircle
+    ctx.arc(infieldRightX, centerY, infieldTurnRadius, -Math.PI / 2, Math.PI / 2, false);
+    // Bottom straight
+    ctx.lineTo(infieldLeftX, centerY + infieldTurnRadius);
+    // Left semicircle
+    ctx.arc(infieldLeftX, centerY, infieldTurnRadius, Math.PI / 2, -Math.PI / 2, false);
+    ctx.closePath();
     ctx.fill();
     
     // Field markings (throwing circles/lines)
@@ -1228,76 +1359,88 @@ function drawStadiumCrowd() {
     
     // Throwing circle in center-left
     ctx.beginPath();
-    ctx.ellipse(centerX - radiusX * 0.3, centerY, 20, 15, 0, 0, Math.PI * 2);
+    ctx.arc(infieldLeftX + infieldTurnRadius * 0.3, centerY, 20, 0, Math.PI * 2);
     ctx.stroke();
     
     // Throwing circle in center-right
     ctx.beginPath();
-    ctx.ellipse(centerX + radiusX * 0.3, centerY, 20, 15, 0, 0, Math.PI * 2);
+    ctx.arc(infieldRightX - infieldTurnRadius * 0.3, centerY, 20, 0, Math.PI * 2);
     ctx.stroke();
     
     // Long jump pit area
     ctx.fillStyle = 'rgba(139, 69, 19, 0.3)';
-    ctx.fillRect(centerX - 30, centerY + radiusY * 0.3, 60, 25);
+    ctx.fillRect(centerX - 30, centerY + infieldTurnRadius * 0.3, 60, 25);
     ctx.strokeStyle = 'rgba(255,255,255,0.5)';
-    ctx.strokeRect(centerX - 30, centerY + radiusY * 0.3, 60, 25);
+    ctx.strokeRect(centerX - 30, centerY + infieldTurnRadius * 0.3, 60, 25);
     
     // White line border around field
     ctx.strokeStyle = '#fff';
     ctx.lineWidth = 3;
     ctx.beginPath();
-    ctx.ellipse(centerX, centerY, radiusX * 0.97, radiusY * 0.97, 0, 0, Math.PI * 2);
+    ctx.moveTo(infieldLeftX, centerY - infieldTurnRadius);
+    ctx.lineTo(infieldRightX, centerY - infieldTurnRadius);
+    ctx.arc(infieldRightX, centerY, infieldTurnRadius, -Math.PI / 2, Math.PI / 2, false);
+    ctx.lineTo(infieldLeftX, centerY + infieldTurnRadius);
+    ctx.arc(infieldLeftX, centerY, infieldTurnRadius, Math.PI / 2, -Math.PI / 2, false);
+    ctx.closePath();
     ctx.stroke();
     
     // Decorative flags around stadium
     const flagColors = ['#FFD700', '#C0C0C0', '#CD7F32', '#4169E1', '#DC143C'];
-    for (let i = 0; i < 12; i++) {
-        const flagAngle = (i / 12) * Math.PI * 2;
-        const flagX = centerX + Math.cos(flagAngle) * (radiusX + 140);
-        const flagY = centerY + Math.sin(flagAngle) * (radiusY + 140);
-        
+    const flagPositions = [
+        { x: leftCenterX - turnRadius - 80, y: centerY },  // Left
+        { x: leftCenterX - turnRadius * 0.7, y: centerY - turnRadius - 80 },  // Top left
+        { x: centerX, y: centerY - turnRadius - 100 },  // Top center
+        { x: rightCenterX + turnRadius * 0.7, y: centerY - turnRadius - 80 },  // Top right
+        { x: rightCenterX + turnRadius + 80, y: centerY },  // Right
+        { x: rightCenterX + turnRadius * 0.7, y: centerY + turnRadius + 80 },  // Bottom right
+        { x: centerX, y: centerY + turnRadius + 100 },  // Bottom center
+        { x: leftCenterX - turnRadius * 0.7, y: centerY + turnRadius + 80 },  // Bottom left
+    ];
+    
+    flagPositions.forEach((pos, i) => {
         // Flag pole
         ctx.fillStyle = '#696969';
-        ctx.fillRect(flagX - 2, flagY - 60, 4, 70);
+        ctx.fillRect(pos.x - 2, pos.y - 60, 4, 70);
         
         // Flag
         const flagColor = flagColors[i % flagColors.length];
         ctx.fillStyle = flagColor;
         ctx.beginPath();
-        ctx.moveTo(flagX + 2, flagY - 55);
-        ctx.lineTo(flagX + 35, flagY - 45);
-        ctx.lineTo(flagX + 2, flagY - 35);
+        ctx.moveTo(pos.x + 2, pos.y - 55);
+        ctx.lineTo(pos.x + 35, pos.y - 45);
+        ctx.lineTo(pos.x + 2, pos.y - 35);
         ctx.closePath();
         ctx.fill();
-    }
+    });
     
     // Stadium announcer booth (top center)
     ctx.fillStyle = '#808080';
-    ctx.fillRect(centerX - 60, centerY - radiusY - 160, 120, 40);
+    ctx.fillRect(centerX - 60, centerY - turnRadius - 160, 120, 40);
     ctx.fillStyle = '#A9A9A9';
-    ctx.fillRect(centerX - 55, centerY - radiusY - 155, 110, 35);
+    ctx.fillRect(centerX - 55, centerY - turnRadius - 155, 110, 35);
     
     // Windows on booth
     ctx.fillStyle = '#4682B4';
     for (let i = 0; i < 4; i++) {
-        ctx.fillRect(centerX - 50 + i * 28, centerY - radiusY - 150, 20, 15);
+        ctx.fillRect(centerX - 50 + i * 28, centerY - turnRadius - 150, 20, 15);
     }
     
     // Scoreboard
     ctx.fillStyle = '#1a1a1a';
-    ctx.fillRect(centerX - 80, centerY - radiusY - 200, 160, 45);
+    ctx.fillRect(centerX - 80, centerY - turnRadius - 200, 160, 45);
     ctx.strokeStyle = '#333';
     ctx.lineWidth = 3;
-    ctx.strokeRect(centerX - 80, centerY - radiusY - 200, 160, 45);
+    ctx.strokeRect(centerX - 80, centerY - turnRadius - 200, 160, 45);
     
     // Scoreboard text
     ctx.fillStyle = '#00FF00';
     ctx.font = 'bold 14px Arial';
     ctx.textAlign = 'center';
-    ctx.fillText('OLYMPIC STADIUM', centerX, centerY - radiusY - 188);
+    ctx.fillText('OLYMPIC STADIUM', centerX, centerY - turnRadius - 188);
     ctx.fillStyle = '#FFFF00';
     ctx.font = 'bold 10px Arial';
-    ctx.fillText('RELAY RACE', centerX, centerY - radiusY - 172);
+    ctx.fillText('RELAY RACE', centerX, centerY - turnRadius - 172);
     
     // Clouds in sky
     ctx.fillStyle = 'rgba(255,255,255,0.6)';
@@ -1317,10 +1460,14 @@ function drawCloud(x, y, size) {
 }
 
 function drawTrackMarkers() {
-    const { centerX, centerY, radiusX, radiusY } = gameState.track;
+    const { centerX, centerY, turnRadius, straightLength, laneWidth } = gameState.track;
+    const leftCenterX = centerX - straightLength / 2;
+    const rightCenterX = centerX + straightLength / 2;
     const numTeams = gameState.teams.length;
+    const trackWidth = numTeams * laneWidth;
     
     // Distance markers (every 25% of track)
+    // Start/finish is on the bottom straight near the right curve
     const markerPositions = [0, 0.25, 0.5, 0.75];
     const markerLabels = ['Start', '250m', '500m', '750m'];
     
@@ -1328,16 +1475,61 @@ function drawTrackMarkers() {
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     
+    const circumference = (2 * straightLength) + (2 * Math.PI * turnRadius);
+    
     markerPositions.forEach((pos, index) => {
-        const angle = pos * Math.PI * 2;
-        const x = centerX + Math.cos(angle) * (radiusX + 10);
-        const y = centerY + Math.sin(angle) * (radiusY + 10);
+        const distance = pos * circumference;
+        const semicircleLength = Math.PI * turnRadius;
+        const straightPathLength = straightLength;
+        
+        let x, y, markerAngle;
+        
+        // Start/Finish line is at the bottom straight near the right curve
+        // Offset to align with the finish line position
+        const startOffset = 20; // Distance from right curve on bottom straight
+        
+        if (distance < straightPathLength - startOffset) {
+            // Bottom straight (from start line to left)
+            const progress = distance / (straightPathLength - startOffset);
+            x = (rightCenterX - startOffset) - (progress * (straightLength - startOffset));
+            y = centerY + turnRadius + 10;
+            markerAngle = Math.PI / 2;
+        } else if (distance < straightPathLength + semicircleLength - startOffset) {
+            // Left semicircle
+            const arcDistance = distance - (straightPathLength - startOffset);
+            const arcProgress = arcDistance / semicircleLength;
+            const angle = Math.PI / 2 + (arcProgress * Math.PI);
+            x = leftCenterX + Math.cos(angle) * (turnRadius + 10);
+            y = centerY + Math.sin(angle) * (turnRadius + 10);
+            markerAngle = angle;
+        } else if (distance < 2 * straightPathLength + semicircleLength - startOffset) {
+            // Top straight
+            const progress = (distance - (straightPathLength + semicircleLength - startOffset)) / straightPathLength;
+            x = leftCenterX + (progress * straightLength);
+            y = centerY - turnRadius - 10;
+            markerAngle = -Math.PI / 2;
+        } else if (distance < circumference - startOffset) {
+            // Right semicircle (up to start line)
+            const arcDistance = distance - (2 * straightPathLength + semicircleLength - startOffset);
+            const arcProgress = arcDistance / (semicircleLength - (startOffset / semicircleLength) * semicircleLength);
+            const angle = -Math.PI / 2 + (arcProgress * (Math.PI - (startOffset / turnRadius)));
+            x = rightCenterX + Math.cos(angle) * (turnRadius + 10);
+            y = centerY + Math.sin(angle) * (turnRadius + 10);
+            markerAngle = angle;
+        } else {
+            // Back to start line
+            x = rightCenterX - startOffset;
+            y = centerY + turnRadius + 10;
+            markerAngle = Math.PI / 2;
+        }
         
         // Marker line
         ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
         ctx.lineWidth = 2;
         ctx.beginPath();
-        ctx.moveTo(centerX + Math.cos(angle) * (radiusX - 10), centerY + Math.sin(angle) * (radiusY - 10));
+        const innerX = x - Math.cos(markerAngle) * 10;
+        const innerY = y - Math.sin(markerAngle) * 10;
+        ctx.moveTo(innerX, innerY);
         ctx.lineTo(x, y);
         ctx.stroke();
         
@@ -1349,27 +1541,14 @@ function drawTrackMarkers() {
         
         // Marker label
         ctx.fillStyle = 'rgba(255, 255, 255, 0.7)';
-        ctx.fillText(markerLabels[index], x, y + 20);
+        const labelX = x + Math.cos(markerAngle) * 20;
+        const labelY = y + Math.sin(markerAngle) * 20;
+        ctx.fillText(markerLabels[index], labelX, labelY);
     });
     
-    // Draw animated finish line
-    const finishAngle = 0; // Right side of track
-    const finishX = centerX + radiusX;
-    const finishY = centerY;
-    
-    // Checkered pattern for finish line
-    const checkSize = 10;
-    for (let i = 0; i < 10; i++) {
-        for (let j = 0; j < 2; j++) {
-            ctx.fillStyle = (i + j) % 2 === 0 ? '#fff' : '#000';
-            ctx.fillRect(
-                finishX - 8,
-                finishY - 50 + i * checkSize,
-                8,
-                checkSize
-            );
-        }
-    }
+    // Draw animated finish line glow at the bottom straight
+    const finishX = rightCenterX - 20;
+    const finishY = centerY + turnRadius - trackWidth / 2;
     
     // Finish line glow
     const finishGlow = ctx.createRadialGradient(finishX, finishY, 0, finishX, finishY, 60);
@@ -1513,79 +1692,130 @@ function updateAndDrawFireworks() {
 }
 
 function drawTrack() {
-    const { centerX, centerY, radiusX, radiusY, laneWidth } = gameState.track;
+    const { centerX, centerY, turnRadius, straightLength, laneWidth } = gameState.track;
     const numTeams = gameState.teams.length;
     
-    // Track base layer (brick red - Olympic track color)
-    const trackGradient = ctx.createRadialGradient(centerX, centerY, 0, centerX, centerY, radiusX);
-    trackGradient.addColorStop(0, '#CD5C5C');  // Indian red
+    // Calculate the left and right semicircle centers
+    const leftCenterX = centerX - straightLength / 2;
+    const rightCenterX = centerX + straightLength / 2;
+    
+    // Track base layer (brick red - Olympic track color) - draw the outer boundary
+    const trackGradient = ctx.createLinearGradient(leftCenterX - turnRadius, centerY, rightCenterX + turnRadius, centerY);
+    trackGradient.addColorStop(0, '#B22222');  // Firebrick
     trackGradient.addColorStop(0.5, '#D2691E');  // Chocolate/brick
     trackGradient.addColorStop(1, '#B22222');  // Firebrick
     
     ctx.fillStyle = trackGradient;
     ctx.beginPath();
-    ctx.ellipse(centerX, centerY, radiusX + 20, radiusY + 20, 0, 0, Math.PI * 2);
+    // Outer stadium shape
+    const outerTurnRadius = turnRadius + 20;
+    // Top straight
+    ctx.moveTo(leftCenterX, centerY - outerTurnRadius);
+    ctx.lineTo(rightCenterX, centerY - outerTurnRadius);
+    // Right semicircle (top to bottom)
+    ctx.arc(rightCenterX, centerY, outerTurnRadius, -Math.PI / 2, Math.PI / 2, false);
+    // Bottom straight
+    ctx.lineTo(leftCenterX, centerY + outerTurnRadius);
+    // Left semicircle (bottom to top)
+    ctx.arc(leftCenterX, centerY, outerTurnRadius, Math.PI / 2, -Math.PI / 2, false);
+    ctx.closePath();
     ctx.fill();
     
     // Draw track lanes with realistic colors
     for (let i = 0; i <= numTeams; i++) {
         const radiusOffset = i * laneWidth;
-        const rx = radiusX - radiusOffset;
-        const ry = radiusY - radiusOffset;
+        const currentTurnRadius = turnRadius - radiusOffset;
         
-        if (rx <= 0 || ry <= 0) break;
+        if (currentTurnRadius <= 0) break;
+        
+        const currentLeftX = leftCenterX;
+        const currentRightX = rightCenterX;
         
         // White lane lines
         ctx.strokeStyle = '#fff';
         ctx.lineWidth = i === 0 ? 5 : 3;
         ctx.beginPath();
-        ctx.ellipse(centerX, centerY, rx, ry, 0, 0, Math.PI * 2);
+        // Top straight
+        ctx.moveTo(currentLeftX, centerY - currentTurnRadius);
+        ctx.lineTo(currentRightX, centerY - currentTurnRadius);
+        // Right semicircle
+        ctx.arc(currentRightX, centerY, currentTurnRadius, -Math.PI / 2, Math.PI / 2, false);
+        // Bottom straight
+        ctx.lineTo(currentLeftX, centerY + currentTurnRadius);
+        // Left semicircle
+        ctx.arc(currentLeftX, centerY, currentTurnRadius, Math.PI / 2, -Math.PI / 2, false);
+        ctx.closePath();
         ctx.stroke();
         
         // Lane surface (gradient for depth)
         if (i < numTeams) {
-            const laneGradient = ctx.createRadialGradient(
-                centerX + rx * 0.3, centerY, 0,
-                centerX, centerY, rx
-            );
-            laneGradient.addColorStop(0, '#E07050');
-            laneGradient.addColorStop(1, '#C04030');
-            
-            ctx.fillStyle = laneGradient;
-            ctx.beginPath();
-            ctx.ellipse(centerX, centerY, rx, ry, 0, 0, Math.PI * 2);
-            ctx.ellipse(centerX, centerY, rx - laneWidth, ry - laneWidth, 0, 0, Math.PI * 2, true);
-            ctx.fill();
+            const nextTurnRadius = turnRadius - radiusOffset - laneWidth;
+            if (nextTurnRadius > 0) {
+                const laneGradient = ctx.createLinearGradient(currentLeftX, centerY, currentRightX, centerY);
+                laneGradient.addColorStop(0, '#C04030');
+                laneGradient.addColorStop(0.5, '#E07050');
+                laneGradient.addColorStop(1, '#C04030');
+                
+                ctx.fillStyle = laneGradient;
+                ctx.beginPath();
+                // Top straight
+                ctx.moveTo(currentLeftX, centerY - currentTurnRadius);
+                ctx.lineTo(currentRightX, centerY - currentTurnRadius);
+                // Right semicircle
+                ctx.arc(currentRightX, centerY, currentTurnRadius, -Math.PI / 2, Math.PI / 2, false);
+                // Bottom straight
+                ctx.lineTo(currentLeftX, centerY + currentTurnRadius);
+                // Left semicircle
+                ctx.arc(currentLeftX, centerY, currentTurnRadius, Math.PI / 2, -Math.PI / 2, false);
+                ctx.closePath();
+                
+                // Cut out inner part
+                ctx.moveTo(currentLeftX, centerY - nextTurnRadius);
+                ctx.lineTo(currentRightX, centerY - nextTurnRadius);
+                ctx.arc(currentRightX, centerY, nextTurnRadius, -Math.PI / 2, Math.PI / 2, false);
+                ctx.lineTo(currentLeftX, centerY + nextTurnRadius);
+                ctx.arc(currentLeftX, centerY, nextTurnRadius, Math.PI / 2, -Math.PI / 2, false);
+                ctx.closePath();
+                ctx.fill();
+            }
         }
     }
     
-    // Lane numbers on track
+    // Lane numbers on track (bottom straight)
     ctx.fillStyle = '#fff';
     ctx.font = 'bold 12px Arial';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     for (let i = 1; i <= numTeams; i++) {
-        const angle = Math.PI / 2; // Bottom of track
-        const rx = radiusX - (i * laneWidth) + laneWidth / 2;
-        const ry = radiusY - (i * laneWidth) + laneWidth / 2;
-        const x = centerX + rx * Math.cos(angle);
-        const y = centerY + ry * Math.sin(angle);
+        const laneOffset = (i - 1) * laneWidth + laneWidth / 2;
+        const currentTurnRadius = turnRadius - laneOffset;
+        const x = centerX;
+        const y = centerY + currentTurnRadius;
         
         ctx.fillText(i.toString(), x, y);
     }
     
     // Inner field (green turf)
-    const fieldRadiusX = radiusX - numTeams * laneWidth - 10;
-    const fieldRadiusY = radiusY - numTeams * laneWidth - 10;
-    
-    const fieldGradient = ctx.createRadialGradient(centerX, centerY, 0, centerX, centerY, fieldRadiusX);
-    fieldGradient.addColorStop(0, '#228B22');  // Forest green
-    fieldGradient.addColorStop(1, '#2E8B57');  // Sea green
-    
-    ctx.fillStyle = fieldGradient;
-    ctx.beginPath();
-    ctx.ellipse(centerX, centerY, fieldRadiusX, fieldRadiusY, 0, 0, Math.PI * 2);
-    ctx.fill();
+    const innerTurnRadius = turnRadius - numTeams * laneWidth - 10;
+    if (innerTurnRadius > 0) {
+        const fieldGradient = ctx.createRadialGradient(centerX, centerY, 0, centerX, centerY, straightLength / 2 + innerTurnRadius);
+        fieldGradient.addColorStop(0, '#228B22');  // Forest green
+        fieldGradient.addColorStop(1, '#2E8B57');  // Sea green
+        
+        ctx.fillStyle = fieldGradient;
+        ctx.beginPath();
+        // Top straight
+        ctx.moveTo(leftCenterX, centerY - innerTurnRadius);
+        ctx.lineTo(rightCenterX, centerY - innerTurnRadius);
+        // Right semicircle
+        ctx.arc(rightCenterX, centerY, innerTurnRadius, -Math.PI / 2, Math.PI / 2, false);
+        // Bottom straight
+        ctx.lineTo(leftCenterX, centerY + innerTurnRadius);
+        // Left semicircle
+        ctx.arc(leftCenterX, centerY, innerTurnRadius, Math.PI / 2, -Math.PI / 2, false);
+        ctx.closePath();
+        ctx.fill();
+    }
     
     // Draw lane dividing lines (dashed)
     ctx.strokeStyle = 'rgba(255,255,255,0.3)';
@@ -1593,41 +1823,52 @@ function drawTrack() {
     ctx.setLineDash([10, 10]);
     for (let i = 1; i < numTeams; i++) {
         const radiusOffset = i * laneWidth;
-        const rx = radiusX - radiusOffset;
-        const ry = radiusY - radiusOffset;
+        const currentTurnRadius = turnRadius - radiusOffset;
         
-        if (rx <= 0 || ry <= 0) break;
+        if (currentTurnRadius <= 0) break;
         
         ctx.beginPath();
-        ctx.ellipse(centerX, centerY, rx, ry, 0, 0, Math.PI * 2);
+        // Top straight
+        ctx.moveTo(leftCenterX, centerY - currentTurnRadius);
+        ctx.lineTo(rightCenterX, centerY - currentTurnRadius);
+        // Right semicircle
+        ctx.arc(rightCenterX, centerY, currentTurnRadius, -Math.PI / 2, Math.PI / 2, false);
+        // Bottom straight
+        ctx.lineTo(leftCenterX, centerY + currentTurnRadius);
+        // Left semicircle
+        ctx.arc(leftCenterX, centerY, currentTurnRadius, Math.PI / 2, -Math.PI / 2, false);
+        ctx.closePath();
         ctx.stroke();
     }
     ctx.setLineDash([]);
     
-    // Draw start/finish line (vertical line on the right side)
+    // Draw start/finish line (vertical line on the bottom straight)
+    // Position it at the right side of the bottom straight - runners cross it going left
+    const finishLineX = rightCenterX - 20; // Slightly inset from the right curve
+    const trackWidth = numTeams * laneWidth;
+    
     ctx.strokeStyle = '#fff';
     ctx.lineWidth = 6;
     ctx.beginPath();
-    ctx.moveTo(centerX + radiusX, centerY - 40);
-    ctx.lineTo(centerX + radiusX, centerY + 40);
+    ctx.moveTo(finishLineX, centerY + turnRadius - trackWidth - 10);
+    ctx.lineTo(finishLineX, centerY + turnRadius + 10);
     ctx.stroke();
     
-    // Draw checkered pattern on finish line
+    // Draw checkered pattern on finish line (vertical)
     const checkSize = 8;
-    for (let i = 0; i < 10; i++) {
+    const lineHeight = trackWidth + 20;
+    const numChecks = Math.ceil(lineHeight / checkSize);
+    for (let i = 0; i < numChecks; i++) {
         for (let j = 0; j < 2; j++) {
             ctx.fillStyle = (i + j) % 2 === 0 ? '#fff' : '#000';
             ctx.fillRect(
-                centerX + radiusX - 4,
-                centerY - 40 + i * checkSize,
+                finishLineX - 4,
+                centerY + turnRadius + 10 - (i + 1) * checkSize,
                 8,
                 checkSize
             );
         }
     }
-    
-    // Team info is now displayed in the header at the top of the screen
-    // This keeps the track clean and all team info visible in one place
     
     // Draw lap counter in center
     const displayLap = gameState.currentLap || 1;
@@ -1641,7 +1882,7 @@ function drawTrack() {
 }
 
 function drawSprinter(team, index) {
-    const { centerX, centerY, radiusX, radiusY, laneWidth } = gameState.track;
+    const { centerX, centerY, turnRadius, straightLength, laneWidth } = gameState.track;
     
     // Get team-specific colors
     const teamIndex = index % teamColors.length;
@@ -1653,25 +1894,12 @@ function drawSprinter(team, index) {
     const skinIndex = team.currentStudent % skinTones.length;
     const skinColor = skinTones[skinIndex];
     
-    // Calculate position on oval track
-    const avgRadius = (radiusX + radiusY) / 2;
-    const trackCircumference = 2 * Math.PI * avgRadius;
-    
-    // Convert position to angle around track (counter-clockwise from right)
-    const progress = (team.position % trackCircumference) / trackCircumference;
-    const angle = progress * Math.PI * 2;
-    
-    // Calculate lane position
-    const laneOffset = index * laneWidth + laneWidth / 2;
-    const rx = radiusX - laneOffset;
-    const ry = radiusY - laneOffset;
-    
-    // Position on oval
-    const x = centerX + Math.cos(angle) * rx;
-    const y = centerY + Math.sin(angle) * ry;
-    
-    // Rotation angle (tangent to track, facing forward)
-    const rotationAngle = angle + Math.PI / 2;
+    // Calculate position on stadium track using helper function
+    const distance = team.position % gameState.track.circumference;
+    const pos = getStadiumTrackPosition(distance, index);
+    const x = pos.x;
+    const y = pos.y;
+    const rotationAngle = pos.rotationAngle;
     
     ctx.save();
     ctx.translate(x, y);
@@ -2157,39 +2385,28 @@ function drawSprinter(team, index) {
 
 function drawVictoryLap() {
     // Draw special victory lap celebration for winning team
-    const { centerX, centerY, radiusX, radiusY } = gameState.track;
-    
-    // Golden glow around the winner's lane
     const winnerTeam = gameState.victoryLapTeams[0];
     if (winnerTeam) {
         const laneIndex = gameState.teams.indexOf(winnerTeam);
-        const avgRadius = (radiusX + radiusY) / 2;
-        const trackCircumference = 2 * Math.PI * avgRadius;
-        const progress = (winnerTeam.position % trackCircumference) / trackCircumference;
-        const angle = progress * Math.PI * 2;
-        const laneOffset = laneIndex * gameState.track.laneWidth + gameState.track.laneWidth / 2;
-        const rx = radiusX - laneOffset;
-        const ry = radiusY - laneOffset;
-        const x = centerX + Math.cos(angle) * rx;
-        const y = centerY + Math.sin(angle) * ry;
+        const pos = getStadiumTrackPosition(winnerTeam.position, laneIndex);
         
         // Victory glow
-        const glow = ctx.createRadialGradient(x, y, 0, x, y, 100);
+        const glow = ctx.createRadialGradient(pos.x, pos.y, 0, pos.x, pos.y, 100);
         glow.addColorStop(0, 'rgba(255, 215, 0, 0.4)');
         glow.addColorStop(1, 'rgba(255, 215, 0, 0)');
         ctx.fillStyle = glow;
         ctx.beginPath();
-        ctx.arc(x, y, 100, 0, Math.PI * 2);
+        ctx.arc(pos.x, pos.y, 100, 0, Math.PI * 2);
         ctx.fill();
         
         // Victory trail
         for (let i = 1; i <= 10; i++) {
-            const trailAngle = angle - (i * 0.02);
-            const trailX = centerX + Math.cos(trailAngle) * rx;
-            const trailY = centerY + Math.sin(trailAngle) * ry;
+            const trailDistance = Math.max(0, winnerTeam.position - i * 5);
+            const trailPos = getStadiumTrackPosition(trailDistance, laneIndex);
+            
             ctx.fillStyle = `rgba(255, 215, 0, ${0.3 - i * 0.03})`;
             ctx.beginPath();
-            ctx.arc(trailX, trailY, 30 - i * 2, 0, Math.PI * 2);
+            ctx.arc(trailPos.x, trailPos.y, 30 - i * 2, 0, Math.PI * 2);
             ctx.fill();
         }
     }
@@ -2524,18 +2741,15 @@ function handleTeamAnswer(teamIndex, selectedIndex, correctIndex) {
         team.isCorrect = true;
         team.answerTime = Date.now(); // Store when they answered
         
+        // Track correct answer for this student
+        if (team.studentCorrectAnswers && team.studentCorrectAnswers[team.currentStudent] !== undefined) {
+            team.studentCorrectAnswers[team.currentStudent]++;
+        }
+        
         // Green particle burst for correct answer
-        const { centerX, centerY, radiusX, radiusY, laneWidth } = gameState.track;
-        const avgRadius = (radiusX + radiusY) / 2;
-        const trackCircumference = 2 * Math.PI * avgRadius;
-        const progress = (team.position % trackCircumference) / trackCircumference;
-        const angle = progress * Math.PI * 2;
-        const laneOffset = teamColors.indexOf(team.color) * laneWidth + laneWidth / 2;
-        const rx = radiusX - laneOffset;
-        const ry = radiusY - laneOffset;
-        const x = centerX + Math.cos(angle) * rx;
-        const y = centerY + Math.sin(angle) * ry;
-        createParticleBurst(x, y - 30, '#00ff00', 25);
+        const laneIndex = teamColors.indexOf(team.color);
+        const pos = getStadiumTrackPosition(team.position, laneIndex);
+        createParticleBurst(pos.x, pos.y - 30, '#00ff00', 25);
     } else {
         buttons[selectedIndex].classList.add('wrong');
         buttons[correctIndex].classList.add('correct');
@@ -2547,17 +2761,9 @@ function handleTeamAnswer(teamIndex, selectedIndex, correctIndex) {
         team.answerTime = Date.now(); // Store when they answered
         
         // Red particle burst and screen shake for wrong answer
-        const { centerX, centerY, radiusX, radiusY, laneWidth } = gameState.track;
-        const avgRadius = (radiusX + radiusY) / 2;
-        const trackCircumference = 2 * Math.PI * avgRadius;
-        const progress = (team.position % trackCircumference) / trackCircumference;
-        const angle = progress * Math.PI * 2;
-        const laneOffset = teamColors.indexOf(team.color) * laneWidth + laneWidth / 2;
-        const rx = radiusX - laneOffset;
-        const ry = radiusY - laneOffset;
-        const x = centerX + Math.cos(angle) * rx;
-        const y = centerY + Math.sin(angle) * ry;
-        createParticleBurst(x, y - 30, '#ff0000', 25);
+        const laneIndex = teamColors.indexOf(team.color);
+        const pos = getStadiumTrackPosition(team.position, laneIndex);
+        createParticleBurst(pos.x, pos.y - 30, '#ff0000', 25);
         triggerScreenShake(20);
     }
     
@@ -2824,7 +3030,31 @@ function endRace() {
                 const place = index + 1;
                 const placeName = place === 1 ? 'first' : place === 2 ? 'second' : 'third';
                 const teamNameHasArabic = containsArabic(team.name);
-                const studentName = team.studentNames[0] || '';
+                
+                // Find student(s) with most correct answers
+                let bestScore = -1;
+                let bestStudents = [];
+                if (team.studentCorrectAnswers && team.studentCorrectAnswers.length > 0) {
+                    bestScore = Math.max(...team.studentCorrectAnswers);
+                    if (team.studentNames && team.studentNames.length > 0) {
+                        team.studentCorrectAnswers.forEach((score, idx) => {
+                            if (score === bestScore && team.studentNames[idx]) {
+                                bestStudents.push(team.studentNames[idx]);
+                            }
+                        });
+                    }
+                }
+                
+                let studentsHTML = '';
+                if (bestStudents.length > 0) {
+                    studentsHTML = `<div class="podium-student">${bestStudents.join(' / ')} (${bestScore})</div>`;
+                } else {
+                    // Fallback to first student if no tracking data
+                    const studentName = team.studentNames[0] || '';
+                    if (studentName) {
+                        studentsHTML = `<div class="podium-student">${studentName}</div>`;
+                    }
+                }
                 
                 podiumHTML += `
                     <div class="podium-place ${placeName}">
@@ -2832,7 +3062,7 @@ function endRace() {
                         <div class="podium-team ${teamNameHasArabic ? 'arabic-text' : ''}" ${teamNameHasArabic ? 'dir="rtl"' : ''}>
                             ${team.name}
                         </div>
-                        ${studentName ? `<div class="podium-student">${studentName}</div>` : ''}
+                        ${studentsHTML}
                     </div>
                 `;
             });
