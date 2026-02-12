@@ -458,14 +458,14 @@ h3 {
 }
 
 #speedSlider {
-    width: 150px;
+    width: 200px;
     cursor: pointer;
     height: 10px;
     accent-color: #ffd700;
 }
 
 #speedValue {
-    min-width: 50px;
+    min-width: 60px;
     font-weight: bold;
     color: #ffd700;
     text-align: center;

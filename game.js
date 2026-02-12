@@ -938,7 +938,7 @@ function startGame() {
             studentNames: studentsList,
             position: 0,
             speed: 0,
-            baseSpeed: 2,
+            baseSpeed: 5,
             boostMultiplier: 2.5,
             slowMultiplier: 0.5,
             finished: false,
@@ -968,8 +968,8 @@ function startGame() {
     const slider = document.getElementById('speedSlider');
     const valueDisplay = document.getElementById('speedValue');
     if (slider && valueDisplay) {
-        slider.value = 2;
-        valueDisplay.textContent = '2.0x';
+        slider.value = 5;
+        valueDisplay.textContent = '5.0x';
     }
     
     startCountdown();
