@@ -145,6 +145,7 @@ const translations = {
         pause: 'إيقاف مؤقت',
         lapInfo: 'اللفة {0} من {1}',
         lap: 'لفة',
+        speedLabel: 'السرعة:',
         
         // Question panel
         waitingForOthers: 'في انتظار الفرق الأخرى...',
@@ -237,6 +238,7 @@ const translations = {
         pause: 'Pause',
         lapInfo: 'Lap {0} of {1}',
         lap: 'lap',
+        speedLabel: 'Speed:',
         
         // Question panel
         waitingForOthers: 'Waiting for other teams...',
@@ -353,6 +355,7 @@ function setupEventListeners() {
     document.getElementById('btnResume').addEventListener('click', resumeGame);
     document.getElementById('btnRestart').addEventListener('click', restartGame);
     document.getElementById('btnQuitToMenu').addEventListener('click', quitToMenu);
+    document.getElementById('speedSlider').addEventListener('input', updateBaseSpeed);
     
     // Results
     document.getElementById('btnNewGameFromResults').addEventListener('click', showGameSetup);
@@ -414,16 +417,28 @@ function resizeCanvas() {
 }
 
 function initTrackDimensions() {
-    // Calculate oval track dimensions to fit on screen with padding
-    const padding = 80;
-    const minDimension = Math.min(canvas.width, canvas.height);
+    // Calculate oval track dimensions to fit on screen with responsive padding
+    const isMobile = window.innerWidth <= 768;
+    const isTablet = window.innerWidth <= 992;
+    const padding = isMobile ? 50 : (isTablet ? 60 : 80);
     
     gameState.track.centerX = canvas.width / 2;
     gameState.track.centerY = canvas.height / 2;
+    
     // Make the oval wider than tall (typical track shape)
     gameState.track.radiusX = (canvas.width - padding * 2) / 2;
-    gameState.track.radiusY = (canvas.height - padding * 2) / 2.5;
-    gameState.track.laneWidth = 25;
+    
+    // Adjust vertical size based on screen height
+    const verticalPadding = isMobile ? 120 : (isTablet ? 100 : 80);
+    gameState.track.radiusY = (canvas.height - verticalPadding * 2) / 2.5;
+    
+    // Adjust lane width for smaller screens
+    gameState.track.laneWidth = isMobile ? 18 : (isTablet ? 22 : 25);
+    
+    // Ensure minimum sizes
+    gameState.track.radiusX = Math.max(gameState.track.radiusX, 100);
+    gameState.track.radiusY = Math.max(gameState.track.radiusY, 60);
+    gameState.track.laneWidth = Math.max(gameState.track.laneWidth, 15);
 }
 
 // ============================================
@@ -924,8 +939,8 @@ function startGame() {
             position: 0,
             speed: 0,
             baseSpeed: 2,
-            boostSpeed: 5,
-            slowSpeed: 1,
+            boostMultiplier: 2.5,
+            slowMultiplier: 0.5,
             finished: false,
             finishTime: null,
             lapTimes: [],
@@ -948,6 +963,15 @@ function startGame() {
     }
     
     showScreen('gameScreen');
+    
+    // Initialize speed slider
+    const slider = document.getElementById('speedSlider');
+    const valueDisplay = document.getElementById('speedValue');
+    if (slider && valueDisplay) {
+        slider.value = 2;
+        valueDisplay.textContent = '2.0x';
+    }
+    
     startCountdown();
 }
 
@@ -2565,7 +2589,7 @@ function handleTeamAnswer(teamIndex, selectedIndex, correctIndex) {
         gameState.teams.forEach(team => {
             if (team.remainingBoost && team.remainingBoost > 0) {
                 // Restore remaining boost
-                team.speed = team.boostSpeed;
+                team.speed = team.baseSpeed * team.boostMultiplier;
                 team.boostEndTime = now + team.remainingBoost;
                 
                 if (team.speedTimer) {
@@ -2589,7 +2613,7 @@ function handleTeamAnswer(teamIndex, selectedIndex, correctIndex) {
                     const boostDuration = 0.5 * (1 - (index / (correctTeams.length - 1 || 1)));
                     const remainingBoost = boostDuration * 1000;
                     
-                    t.speed = t.boostSpeed;
+                    t.speed = t.baseSpeed * t.boostMultiplier;
                     t.boostEndTime = now + remainingBoost;
                     
                     if (t.speedTimer) {
@@ -2605,7 +2629,7 @@ function handleTeamAnswer(teamIndex, selectedIndex, correctIndex) {
                 });
             } else if (team.isCorrect === false) {
                 // Slowdown for wrong answers
-                team.speed = team.slowSpeed;
+                team.speed = team.baseSpeed * team.slowMultiplier;
                 team.boostEndTime = now + 500;
                 
                 if (team.speedTimer) {
@@ -2721,6 +2745,28 @@ function quitToMenu() {
     }
     
     showMainMenu();
+}
+
+function updateBaseSpeed() {
+    const slider = document.getElementById('speedSlider');
+    const valueDisplay = document.getElementById('speedValue');
+    const newBaseSpeed = parseFloat(slider.value);
+    
+    valueDisplay.textContent = newBaseSpeed.toFixed(1) + 'x';
+    
+    gameState.teams.forEach(team => {
+        // Update the base speed
+        team.baseSpeed = newBaseSpeed;
+        
+        // Update speed if currently at base speed (not boosted or slowed)
+        if (!team.finished && !team.needsQuestion) {
+            if (team.speed === team.baseSpeed || 
+                team.speed === team.baseSpeed * team.boostMultiplier ||
+                team.speed === team.baseSpeed * team.slowMultiplier) {
+                team.speed = newBaseSpeed;
+            }
+        }
+    });
 }
 
 function endRace() {

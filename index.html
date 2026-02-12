@@ -9,6 +9,9 @@
     <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Arabic:wght@400;700&family=Segoe+UI:wght@400;700&display=swap" rel="stylesheet">
 </head>
 <body>
+    <!-- Created by credit -->
+    <div id="createdBy">Created by Mawared</div>
+    
     <!-- Fireworks Canvas -->
     <canvas id="fireworksCanvas"></canvas>
 
@@ -115,6 +118,13 @@
         <div id="questionPanels" class="question-panels-container"></div>
         
         <div id="countdown" class="countdown hidden">3</div>
+        
+        <!-- Speed Control Slider -->
+        <div class="speed-control-bottom">
+            <label for="speedSlider" data-key="speedLabel">Speed:</label>
+            <input type="range" id="speedSlider" min="0.5" max="5" step="0.1" value="2">
+            <span id="speedValue">2.0x</span>
+        </div>
         
         <!-- Waiting overlay for teams that answered while others are still answering -->
         <div id="waitingOverlay" class="waiting-overlay hidden">
