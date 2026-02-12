@@ -423,7 +423,8 @@ function initTrackDimensions() {
     const padding = isMobile ? 50 : (isTablet ? 60 : 80);
     
     gameState.track.centerX = canvas.width / 2;
-    gameState.track.centerY = canvas.height / 2;
+    // Move track down to avoid overlapping with team panels at top
+    gameState.track.centerY = (canvas.height / 2) + 60;
     
     // Stadium track: two parallel straights with semicircular ends
     // Calculate the turn radius (based on screen height)
@@ -1009,7 +1010,7 @@ function startGame() {
             position: 0,
             speed: 0,
             baseSpeed: 5,
-            boostMultiplier: 2.5,
+            boostMultiplier: 2,
             slowMultiplier: 0.5,
             finished: false,
             finishTime: null,
@@ -2519,7 +2520,7 @@ function updateGameHeader() {
                         ">${team.name}</div>
                         <div style="
                             color: #ffd700;
-                            font-size: 1.2em;
+                            font-size: 1.5em;
                             font-weight: 500;
                             font-family: ${studentNameHasArabic ? '"Noto Sans Arabic", Arial' : 'Arial'};
                         ">${studentName}</div>
